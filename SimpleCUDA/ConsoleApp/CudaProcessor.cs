@@ -7,17 +7,19 @@ using System.IO;
 
 namespace ConsoleApp
 {
-    unsafe sealed class SomeState : IDisposable
+    unsafe sealed class CudaProcessor : IDisposable
     {
         private int count, defaultBlockCount, defaultThreadsPerBlock, warpSize;
-        private SomeBasicType* hostBuffer; // results 
+        private ResultPoint* hostBuffer;
+        private ResultPoint* secondHostBuffer;
         private const string path = "MyKernels.c";
         private const string methodName = "Multiply";
-        CudaDeviceVariable<SomeBasicType> deviceBuffer;
+        CudaDeviceVariable<ResultPoint> deviceBuffer;
+        CudaDeviceVariable<ResultPoint> secondDeviceBuffer;
         CudaContext ctx;
         CudaStream defaultStream;
         CudaKernel multiply;
-        public SomeState(int deviceId)
+        public CudaProcessor(int deviceId)
         {
             ctx = new CudaContext(deviceId, true);
             var props = ctx.GetDeviceInfo();
@@ -54,21 +56,38 @@ namespace ConsoleApp
         {
             this.count = count;
             IntPtr hostPointer = IntPtr.Zero;
-            var res = DriverAPINativeMethods.MemoryManagement.cuMemAllocHost_v2(ref hostPointer, count * sizeof(SomeBasicType));
+            var res = DriverAPINativeMethods.MemoryManagement.cuMemAllocHost_v2(ref hostPointer, count * sizeof(ResultPoint));
             if (res != CUResult.Success) throw new CudaException(res);
-            hostBuffer = (SomeBasicType*)hostPointer;
-            deviceBuffer = new CudaDeviceVariable<SomeBasicType>(count);
+            hostBuffer = (ResultPoint*)hostPointer;
+            deviceBuffer = new CudaDeviceVariable<ResultPoint>(count);
             for (int i = 0; i < count; i++)
             {
-                // we'll just set the key and value to i, so: [{0,0},{1,1},{2,2}...]
-                hostBuffer[i].Id = i;
-                hostBuffer[i].Value = (uint)i;
+                hostBuffer[i].X = (uint)i;
+                hostBuffer[i].Y = (uint)i;
             }
             defaultStream = new CudaStream();
             res = DriverAPINativeMethods.AsynchronousMemcpy_v2.cuMemcpyHtoDAsync_v2(
                 deviceBuffer.DevicePointer,
                 hostPointer,
                 deviceBuffer.SizeInBytes,
+                defaultStream.Stream);
+            if (res != CUResult.Success) throw new CudaException(res);
+
+            IntPtr secondHostPointer = IntPtr.Zero;
+            res = DriverAPINativeMethods.MemoryManagement.cuMemAllocHost_v2(ref secondHostPointer, count * sizeof(ResultPoint));
+            if (res != CUResult.Success) throw new CudaException(res);
+            secondHostBuffer = (ResultPoint*)secondHostPointer;
+            secondDeviceBuffer = new CudaDeviceVariable<ResultPoint>(count);
+            for (int i = 0; i < count; i++)
+            {
+                secondHostBuffer[i].X = (uint)i;
+                secondHostBuffer[i].Y = (uint)i;
+            }
+            defaultStream = new CudaStream();
+            res = DriverAPINativeMethods.AsynchronousMemcpy_v2.cuMemcpyHtoDAsync_v2(
+                secondDeviceBuffer.DevicePointer,
+                secondHostPointer,
+                secondDeviceBuffer.SizeInBytes,
                 defaultStream.Stream);
             if (res != CUResult.Success) throw new CudaException(res);
         }
@@ -82,7 +101,7 @@ namespace ConsoleApp
             return value;
         }
 
-        internal void MultiplyAsync(int value)
+        internal void CalculateAsync(int value)
         {
             int threadsPerBlock, blockCount;
             if (count <= defaultThreadsPerBlock)
@@ -104,8 +123,10 @@ namespace ConsoleApp
             multiply.GridDimensions = new ManagedCuda.VectorTypes.dim3(blockCount, 1, 1);
 
             multiply.RunAsync(defaultStream.Stream, new object[] {
-                // note the signature is (N, data, factor)
-                count, deviceBuffer.DevicePointer, value
+                count,
+                deviceBuffer.DevicePointer,
+                secondDeviceBuffer.DevicePointer,
+                value
             });
         }
 
@@ -119,15 +140,24 @@ namespace ConsoleApp
             var res = DriverAPINativeMethods.AsynchronousMemcpy_v2.cuMemcpyDtoHAsync_v2(
                 new IntPtr(hostBuffer), deviceBuffer.DevicePointer, deviceBuffer.SizeInBytes, defaultStream.Stream);
             if (res != CUResult.Success) throw new CudaException(res);
+            res = DriverAPINativeMethods.AsynchronousMemcpy_v2.cuMemcpyDtoHAsync_v2(
+                new IntPtr(secondHostBuffer), secondDeviceBuffer.DevicePointer, secondDeviceBuffer.SizeInBytes, defaultStream.Stream);
+            if (res != CUResult.Success) throw new CudaException(res);
         }
 
-        public SomeBasicType this[int index]
+        public ResultPoint this[int index]
         {
             get
             {
                 if (index < 0 || index >= count) throw new IndexOutOfRangeException();
                 return hostBuffer[index];
             }
+        }
+        public ResultPoint Get(int index)
+        {
+            if (index < 0 || index >= count) throw new IndexOutOfRangeException();
+            return secondHostBuffer[index];
+
         }
 
         public void Dispose() => Dispose(true);
@@ -137,10 +167,10 @@ namespace ConsoleApp
             {
                 GC.SuppressFinalize(this);
             }
-            if (hostBuffer != default(SomeBasicType*))
+            if (secondHostBuffer != default(ResultPoint*))
             {
-                var tmp = new IntPtr(hostBuffer);
-                hostBuffer = default(SomeBasicType*);
+                var tmp = new IntPtr(secondHostBuffer);
+                secondHostBuffer = default(ResultPoint*);
                 try
                 {
                     DriverAPINativeMethods.MemoryManagement.cuMemFreeHost(tmp);

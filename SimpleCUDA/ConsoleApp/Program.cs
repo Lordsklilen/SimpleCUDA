@@ -21,8 +21,8 @@ namespace ConsoleApp
                 {
                     Console.WriteLine($"{i}: {CudaContext.GetDeviceName(i)}");
                 }
-                const int Count = 1024 * 1024;
-                using (var state = new SomeState(deviceId: 0))
+                const int Count = 100;
+                using (var state = new CudaProcessor(deviceId: 0))
                 {
                     Console.WriteLine("Initializing kernel...");
                     var compileResult = state.LoadKernel(out string log);
@@ -37,10 +37,7 @@ namespace ConsoleApp
                     state.InitializeData(Count);
 
                     Console.WriteLine("Running kernel...");
-                    for (int i = 0; i < 8; i++)
-                    {
-                        state.MultiplyAsync(2);
-                    }
+                    state.CalculateAsync(2);
                     Console.WriteLine("Copying data back...");
                     state.CopyToHost();
                     Console.WriteLine("Waiting for completion...");
@@ -49,8 +46,11 @@ namespace ConsoleApp
                     var random = new Random(123456);
                     for (int i = 0; i < 20; i++)
                     {
-                        var record = state[random.Next(Count)];
-                        Console.WriteLine($"{i}: {nameof(record.Id)}={record.Id}, {nameof(record.Value)}={record.Value}");
+                        //var rnd = random.Next(Count);
+                        var multiply = state[i];
+                        var adding = state.Get(i);
+                        Console.WriteLine($"{i}: Multiplication:{nameof(multiply.X)}={multiply.X}, {nameof(multiply.Y)}={multiply.Y}");
+                        Console.WriteLine($"{i}: Addition: {nameof(adding.X)}={adding.X}, {nameof(adding.Y)}={adding.Y}");
                     }
                     Console.WriteLine("Cleaning up...");
                 }
