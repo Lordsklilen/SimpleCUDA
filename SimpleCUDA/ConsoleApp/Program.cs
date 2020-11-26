@@ -25,8 +25,7 @@ namespace ConsoleApp
                 using (var state = new SomeState(deviceId: 0))
                 {
                     Console.WriteLine("Initializing kernel...");
-                    string log;
-                    var compileResult = state.LoadKernel(out log);
+                    var compileResult = state.LoadKernel(out string log);
                     if (compileResult != ManagedCuda.NVRTC.nvrtcResult.Success)
                     {
                         Console.Error.WriteLine(compileResult);
@@ -34,7 +33,6 @@ namespace ConsoleApp
                         return -1;
                     }
                     Console.WriteLine(log);
-
                     Console.WriteLine("Initializing data...");
                     state.InitializeData(Count);
 
@@ -43,16 +41,10 @@ namespace ConsoleApp
                     {
                         state.MultiplyAsync(2);
                     }
-
                     Console.WriteLine("Copying data back...");
-                    state.CopyToHost(); // note: usually you try to minimize how much you need to
-                    // fetch from the device, as that can be a bottleneck; you should prefer fetching
-                    // minimal aggregate data (counts, etc), or the required pages of data; fetching
-                    // *all* the data works, but should be avoided when possible.
-
+                    state.CopyToHost();
                     Console.WriteLine("Waiting for completion...");
                     state.Synchronize();
-
                     Console.WriteLine("all done; showing some results");
                     var random = new Random(123456);
                     for (int i = 0; i < 20; i++)
@@ -60,7 +52,6 @@ namespace ConsoleApp
                         var record = state[random.Next(Count)];
                         Console.WriteLine($"{i}: {nameof(record.Id)}={record.Id}, {nameof(record.Value)}={record.Value}");
                     }
-
                     Console.WriteLine("Cleaning up...");
                 }
                 Console.WriteLine("All done; have a nice day");
